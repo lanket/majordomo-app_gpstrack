@@ -262,10 +262,16 @@ if (isset($_REQUEST['latitude']))
 
          $sqlQuery = "SELECT *
                         FROM gpslog
-                       WHERE DEVICE_ID = '" . $device['ID'] . "'
-                         AND ID        != '" . $rec['ID'] . "'
-                       ORDER BY ADDED DESC
-                       LIMIT 1";
+                       WHERE                          
+						 PARRENT_ID = (
+							SELECT PARRENT_ID
+								FROM gpslog 
+								WHERE DEVICE_ID = '" . $device['ID'] . "' 
+								AND PARRENT_ID != '" . $rec['PARRENT_ID'] . "'
+								ORDER BY ADDED DESC
+								LIMIT 1
+							)
+                       ORDER BY ADDED DESC";
 
          $tmp = SQLSelectOne($sqlQuery);
          
