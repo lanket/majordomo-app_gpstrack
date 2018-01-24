@@ -140,7 +140,7 @@ if (isset($_REQUEST['latitude']))
       
       SQLUpdate('gpsdevices', $device);
    }
-	
+        
    include_once("./modules/app_gpstrack/app_gpstrack.class.php");
    $gpstrack = new app_gpstrack();
    $gpstrack->getConfig();
@@ -162,9 +162,9 @@ if (isset($_REQUEST['latitude']))
    $rec['ACCURACY']  = isset($_REQUEST['accuracy']) ? $_REQUEST['accuracy'] : 0;
 
    if (($max_accuracy != 0) && ($rec['ACCURACY'] > $max_accuracy)) {
-	    //DebMes("GPS Accuracy {$rec['ACCURACY']} > {$max_accuracy} exiting!");
-		$db->Disconnect();
-		exit;
+            //DebMes("GPS Accuracy {$rec['ACCURACY']} > {$max_accuracy} exiting!");
+                $db->Disconnect();
+                exit;
    }
    
    if ($device['ID'])
@@ -242,11 +242,16 @@ if (isset($_REQUEST['latitude']))
       }
       
       //echo ' (' . $locations[$i]['LAT'] . ' : ' . $locations[$i]['LON'] . ') ' . $distance . ' m';
+      
+      $params = array();
+      $params['LOCATION']=$locations[$i]['TITLE'];
+      $params['USER_OBJECT']=$user['LINKED_OBJECT'];
+
       if ($distance <= $locations[$i]['RANGE'])
       {
          //Debmes("Device (" . $device['TITLE'] . ") NEAR location " . $locations[$i]['TITLE']);
          $location_found = 1;
-         
+
          if ($user['LINKED_OBJECT'])
             setGlobal($user['LINKED_OBJECT'] . '.seenAt', $locations[$i]['TITLE']);
          
@@ -267,12 +272,20 @@ if (isset($_REQUEST['latitude']))
          if ($tmp['LOCATION_ID'] != $locations[$i]['ID'])
          {
             //Debmes("Device (" . $device['TITLE'] . ") ENTERED location " . $locations[$i]['TITLE']);
-            
+
+            if ($locations[$i]['LINKED_OBJECT']) {
+               setGlobal($locations[$i]['LINKED_OBJECT'].'.latestVisit',date('Y-m-d H:i:s'));
+               callMethodSafe($locations[$i]['LINKED_OBJECT'].'.userEntered',$params);
+            }
+            if ($params['USER_OBJECT']) {
+               callMethodSafe($params['USER_OBJECT'].'.enteredLocation',array('LOCATION_OBJECT'=>$locations[$i]['LINKED_OBJECT'],'LOCATION'=>$locations[$i]['TITLE']));
+            }
+
             // entered location
             $sqlQuery = "SELECT *
                            FROM gpsactions
                           WHERE LOCATION_ID = '" . $locations[$i]['ID'] . "'
-                            AND ACTION_TYPE = 1
+                            AND (ACTION_TYPE = 1 OR ACTION_TYPE = 2)
                             AND USER_ID     = '" . $device['USER_ID'] . "'";
 
             $gpsaction = SQLSelectOne($sqlQuery);
@@ -283,10 +296,12 @@ if (isset($_REQUEST['latitude']))
                $gpsaction['LOG']      = $gpsaction['EXECUTED'] . " Executed\n" . $gpsaction['LOG'];
                
                SQLUpdate('gpsactions', $gpsaction);
-               
+
+               $params['ENTERING']=1;
+
                if ($gpsaction['SCRIPT_ID'])
                {
-                  runScript($gpsaction['SCRIPT_ID']);
+                  runScript($gpsaction['SCRIPT_ID'],$params);
                }
                elseif ($gpsaction['CODE'])
                {
@@ -312,6 +327,7 @@ if (isset($_REQUEST['latitude']))
       }
       else
       {
+
          $sqlQuery = "SELECT *
                         FROM gpslog
                        WHERE DEVICE_ID = '" . $device['ID'] . "'
@@ -325,11 +341,19 @@ if (isset($_REQUEST['latitude']))
          {
             //Debmes("Device (" . $device['TITLE'] . ") LEFT location " . $locations[$i]['TITLE']);
             
+            if ($locations[$i]['LINKED_OBJECT']) {
+               callMethodSafe($locations[$i]['LINKED_OBJECT'].'.userLeft',$params);
+            }
+            if ($params['USER_OBJECT']) {
+               callMethodSafe($params['USER_OBJECT'].'.leftLocation',array('LOCATION_OBJECT'=>$locations[$i]['LINKED_OBJECT'],'LOCATION'=>$locations[$i]['TITLE']));
+            }
+            
+            $params['LEAVING']=1;
             // left location
             $sqlQuery = "SELECT *
                            FROM gpsactions
                           WHERE LOCATION_ID = '" . $locations[$i]['ID'] . "'
-                            AND ACTION_TYPE = 0
+                            AND (ACTION_TYPE = 0  OR ACTION_TYPE = 2)
                             AND USER_ID     = '" . $device['USER_ID'] . "'";
             
             $gpsaction = SQLSelectOne($sqlQuery);
@@ -343,7 +367,7 @@ if (isset($_REQUEST['latitude']))
                
                if ($gpsaction['SCRIPT_ID'])
                {
-                  runScript($gpsaction['SCRIPT_ID']);
+                  runScript($gpsaction['SCRIPT_ID'],$params);
                }
                elseif ($gpsaction['CODE'])
                {
@@ -367,7 +391,7 @@ if (isset($_REQUEST['latitude']))
 }
 
 if ($user['LINKED_OBJECT'] && !$location_found)
-   setGlobal($user['LINKED_OBJECT'] . '.seenAt', '');
+   setGlobal($user['LINKED_OBJECT'] . '.seenAt', getgeocode($lat, $lon));
 
 $sqlQuery = "SELECT *, DATE_FORMAT(ADDED, '%H:%i') as DAT
                FROM shouts
@@ -430,4 +454,11 @@ function calculateTheDistance($latA, $lonA, $latB, $lonB)
    $dist = round($ad * EARTH_RADIUS);
 
    return $dist;
+}
+
+function getgeocode($lat, $lon)  {
+   $data_file="http://geocode-maps.yandex.ru/1.x/?geocode=N".$lat.",E".$lon; // адрес xml файла
+   $xml = simplexml_load_file($data_file); // раскладываем xml на массив
+   $res=$xml->{'GeoObjectCollection'}->{'featureMember'}[0]->{'GeoObject'}->{'metaDataProperty'}->{'GeocoderMetaData'}->{'AddressDetails'}->{'Country'}->{'AddressLine'};
+   return $res;
 }
